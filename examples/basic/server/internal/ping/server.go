@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	pingpb "github.com/RGood/grotto-web/examples/basic/server/gen/ping"
+	pingpb "github.com/RGood/grotto-web/examples/basic/server/internal/gen/ping"
 )
 
 type Server struct {

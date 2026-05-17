@@ -1,6 +1,6 @@
 PROTO_ROOT := proto
 PROTO_FILES := $(shell find $(PROTO_ROOT) -name '*.proto')
-GO_GEN_OUT := server/gen
+GO_GEN_OUT := server/internal/gen
 TS_GEN_OUT := client/gen
 TS_PROTO_PLUGIN := client/node_modules/.bin/protoc-gen-ts_proto
 

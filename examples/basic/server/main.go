@@ -4,8 +4,8 @@ import (
 	"log"
 	"net"
 
-	pingpb "github.com/RGood/grotto-web/examples/basic/server/gen/ping"
-	"github.com/RGood/grotto-web/examples/basic/server/ping"
+	pingpb "github.com/RGood/grotto-web/examples/basic/server/internal/gen/ping"
+	"github.com/RGood/grotto-web/examples/basic/server/internal/ping"
 	"github.com/RGood/grotto-web/server/pkg/grottoserver"
 )
 
