@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package ping;
+
+option go_package = "github.com/RGood/grotto-web/examples/basic/server/gen/ping";
+
+message PingRequest {
+  string message = 1;
+  // Number of stream messages to send (server/bidi) or cap reads (client stream).
+  uint32 count = 2;
+}
+
+message PingResponse {
+  string message = 1;
+  uint32 sequence = 2;
+}
+
+service PingService {
+  // Unary: one request, one response.
+  rpc Ping(PingRequest) returns (PingResponse);
+
+  // Server streaming: one request, many responses.
+  rpc PingServerStream(PingRequest) returns (stream PingResponse);
+
+  // Client streaming: many requests, one response.
+  rpc PingClientStream(stream PingRequest) returns (PingResponse);
+
+  // Bidirectional streaming: many requests, many responses.
+  rpc PingBidiStream(stream PingRequest) returns (stream PingResponse);
+}

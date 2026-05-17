@@ -1,0 +1,20 @@
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: examples/basic/server/Dockerfile
+    container_name: example-server
+    ports:
+      - "50051:50051"
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ../..
+      dockerfile: examples/basic/client/Dockerfile
+    container_name: example-client
+    depends_on:
+      - server
+    environment:
+      GROTTO_WS_URL: ws://server:50051
+    restart: "no"
