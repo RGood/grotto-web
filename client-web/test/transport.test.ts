@@ -9,7 +9,7 @@ import { WebSocketServer } from 'ws';
 import {
   PingRequest,
   PingServiceClientImpl,
-} from '../../examples/basic/client/gen/ping/ping.js';
+} from '../../examples/basic/client/src/gen/ping/ping.js';
 import {
   decodeFrame,
   encodeFrame,

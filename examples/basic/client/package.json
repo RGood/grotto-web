@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "protoc -I ../proto --plugin=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./gen --ts_proto_opt=outputServices=default,useAsyncIterable=true,esmInterop=true,importSuffix=.js,useOptionals=messages ../proto/ping/ping.proto",
+    "generate": "protoc -I ../proto --plugin=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/gen --ts_proto_opt=outputServices=default,useAsyncIterable=true,esmInterop=true,importSuffix=.js,useOptionals=messages ../proto/ping/ping.proto",
     "start": "node --import tsx src/index.ts",
     "ping": "node --import tsx src/index.ts"
   },

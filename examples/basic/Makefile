@@ -1,7 +1,7 @@
 PROTO_ROOT := proto
 PROTO_FILES := $(shell find $(PROTO_ROOT) -name '*.proto')
 GO_GEN_OUT := server/internal/gen
-TS_GEN_OUT := client/gen
+TS_GEN_OUT := client/src/gen
 TS_PROTO_PLUGIN := ../../node_modules/.bin/protoc-gen-ts_proto
 
 .PHONY: generate generate-go generate-ts run client

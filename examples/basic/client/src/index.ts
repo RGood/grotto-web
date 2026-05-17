@@ -8,7 +8,7 @@
  */
 import { GrottoRpc } from '@grotto/client-web';
 
-import { PingRequest, PingServiceClientImpl } from '../gen/ping/ping.js';
+import { PingRequest, PingServiceClientImpl } from './gen/ping/ping.js';
 
 const target = process.argv[2] ?? process.env.GROTTO_WS_URL ?? 'ws://localhost:50051';
 
