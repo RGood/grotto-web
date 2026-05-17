@@ -30,5 +30,5 @@ run:
 	docker-compose up --build --abort-on-container-exit
 
 client:
-	yarn workspace @grotto/client-web build
-	yarn workspace @grotto/example-basic-client start
+	yarn workspace @grotto-web/client-web build
+	yarn workspace @grotto-web/example-basic-client start

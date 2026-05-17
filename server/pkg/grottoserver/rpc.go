@@ -52,48 +52,58 @@ func (c *rpcConn) SendHeader(md metadata.MD) error {
 func (c *rpcConn) SetTrailer(md metadata.MD) {}
 
 func (c *rpcConn) RecvMsg(m any) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.recvClosed {
-		return io.EOF
-	}
-
-	if len(c.requestBody) > 0 {
-		body := c.requestBody
-		c.requestBody = nil
-		return proto.Unmarshal(body, m.(proto.Message))
-	}
-
 	for {
-		typ, payload, err := c.readFrameLocked()
+		c.mu.Lock()
+		if c.recvClosed {
+			c.mu.Unlock()
+			return io.EOF
+		}
+		if len(c.requestBody) > 0 {
+			body := c.requestBody
+			c.requestBody = nil
+			c.mu.Unlock()
+			return proto.Unmarshal(body, m.(proto.Message))
+		}
+		c.mu.Unlock()
+
+		// Do not hold mu while blocked on the WebSocket read; otherwise
+		// concurrent SendMsg (e.g. chat broadcast) deadlocks until Recv unblocks.
+		hdr, payload, err := c.readFrame()
 		if err != nil {
 			return err
 		}
-		if typ.callID != singleCallID {
+
+		c.mu.Lock()
+		if hdr.callID != singleCallID {
+			c.mu.Unlock()
 			continue
 		}
-		switch typ.typ {
+		switch hdr.typ {
 		case frameHeaders:
 			hp, err := decodeJSON[headersPayload](payload)
 			if err != nil {
+				c.mu.Unlock()
 				return err
 			}
 			c.clientMetadata = metadataFromJSON(hp.Metadata)
 			c.ctx = metadata.NewIncomingContext(c.ctx, c.clientMetadata)
+			c.mu.Unlock()
 		case frameMessage:
 			body, err := decodeGrpcPayload(payload)
+			c.mu.Unlock()
 			if err != nil {
 				return err
 			}
 			return proto.Unmarshal(body, m.(proto.Message))
 		case frameHalfClose:
 			c.recvClosed = true
+			c.mu.Unlock()
 			return io.EOF
 		case frameCancel:
+			c.mu.Unlock()
 			return status.Error(codes.Canceled, "call cancelled")
 		default:
-			continue
+			c.mu.Unlock()
 		}
 	}
 }
@@ -125,39 +135,54 @@ func (c *rpcConn) SendMsg(m any) error {
 }
 
 func (c *rpcConn) consumeUnaryRequest() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	for {
+		c.mu.Lock()
+		if c.recvClosed {
+			c.mu.Unlock()
+			return nil
+		}
+		c.mu.Unlock()
 
-	for !c.recvClosed {
-		hdr, payload, err := c.readFrameLocked()
+		hdr, payload, err := c.readFrame()
 		if err != nil {
 			return err
 		}
+
+		c.mu.Lock()
 		if hdr.callID != singleCallID {
+			c.mu.Unlock()
 			continue
 		}
 		switch hdr.typ {
 		case frameHeaders:
 			hp, err := decodeJSON[headersPayload](payload)
 			if err != nil {
+				c.mu.Unlock()
 				return err
 			}
 			c.clientMetadata = metadataFromJSON(hp.Metadata)
 			c.ctx = metadata.NewIncomingContext(c.ctx, c.clientMetadata)
+			c.mu.Unlock()
 		case frameMessage:
 			body, err := decodeGrpcPayload(payload)
 			if err != nil {
+				c.mu.Unlock()
 				return err
 			}
 			c.requestBody = body
+			c.mu.Unlock()
+			return nil
 		case frameHalfClose:
 			c.recvClosed = true
+			c.mu.Unlock()
 			return nil
 		case frameCancel:
+			c.mu.Unlock()
 			return status.Error(codes.Canceled, "call cancelled")
+		default:
+			c.mu.Unlock()
 		}
 	}
-	return nil
 }
 
 func (c *rpcConn) finishOK() error {
@@ -204,7 +229,7 @@ func (c *rpcConn) finishLocked(code codes.Code, st *status.Status) error {
 	return c.ws.Close()
 }
 
-func (c *rpcConn) readFrameLocked() (frameHeader, []byte, error) {
+func (c *rpcConn) readFrame() (frameHeader, []byte, error) {
 	_, data, err := c.ws.ReadMessage()
 	if err != nil {
 		return frameHeader{}, nil, err

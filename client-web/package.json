@@ -1,19 +1,51 @@
 {
-  "name": "@grotto/client-web",
+  "name": "@grotto-web/client-web",
   "version": "0.1.0",
-  "description": "gRPC-over-WebSocket transport for browsers and Node (ts-proto Rpc)",
+  "description": "gRPC-over-WebSocket client transport for Node and browsers (ts-proto Rpc)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc",
-    "test": "node --import tsx --test --test-force-exit test/**/*.test.ts"
+    "build": "rm -rf dist && tsc",
+    "test": "node --import tsx --test --test-force-exit test/**/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RGood/grotto-web.git",
+    "directory": "client-web"
+  },
+  "bugs": {
+    "url": "https://github.com/RGood/grotto-web/issues"
+  },
+  "homepage": "https://github.com/RGood/grotto-web/tree/main/client-web#readme",
+  "keywords": [
+    "grpc",
+    "websocket",
+    "grotto",
+    "ts-proto",
+    "rpc",
+    "protobuf"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "ws": "^8.0.0"
@@ -30,10 +62,5 @@
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "ws": "^8.18.2"
-  },
-  "files": [
-    "dist",
-    "src"
-  ],
-  "license": "MIT"
+  }
 }

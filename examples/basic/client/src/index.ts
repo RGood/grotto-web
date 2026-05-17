@@ -6,7 +6,7 @@
  *
  *   yarn start ws://localhost:50051
  */
-import { GrottoRpc } from '@grotto/client-web';
+import { GrottoRpc } from '@grotto-web/client-web';
 
 import { PingRequest, PingServiceClientImpl } from './gen/ping/ping.js';
 

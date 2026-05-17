@@ -6,8 +6,9 @@
     "examples/basic/client"
   ],
   "scripts": {
-    "build": "yarn workspace @grotto/client-web build",
-    "test": "yarn workspace @grotto/client-web test",
-    "example": "yarn workspace @grotto/example-basic-client start"
+    "build": "yarn workspace @grotto-web/client-web build",
+    "test": "yarn workspace @grotto-web/client-web test",
+    "example": "yarn workspace @grotto-web/example-basic-client start",
+    "publish:client-web": "yarn workspace @grotto-web/client-web npm publish --access public"
   }
 }

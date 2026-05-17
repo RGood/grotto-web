@@ -9,7 +9,7 @@ COPY examples/basic/client/package.json ./examples/basic/client/
 RUN yarn install --frozen-lockfile
 
 COPY client-web/ ./client-web/
-RUN yarn workspace @grotto/client-web build
+RUN yarn workspace @grotto-web/client-web build
 
 COPY examples/basic/proto ./examples/basic/proto
 COPY examples/basic/client/src ./examples/basic/client/src
