@@ -2,7 +2,7 @@ PROTO_ROOT := proto
 PROTO_FILES := $(shell find $(PROTO_ROOT) -name '*.proto')
 GO_GEN_OUT := server/internal/gen
 TS_GEN_OUT := client/gen
-TS_PROTO_PLUGIN := client/node_modules/.bin/protoc-gen-ts_proto
+TS_PROTO_PLUGIN := ../../node_modules/.bin/protoc-gen-ts_proto
 
 .PHONY: generate generate-go generate-ts run client
 generate: generate-go generate-ts
@@ -16,7 +16,7 @@ generate-go:
 		$(PROTO_FILES)
 
 $(TS_PROTO_PLUGIN):
-	cd client && npm install
+	yarn install
 
 generate-ts: $(TS_PROTO_PLUGIN)
 	mkdir -p $(TS_GEN_OUT)
@@ -30,5 +30,5 @@ run:
 	docker-compose up --build --abort-on-container-exit
 
 client:
-	cd ../../client-web && npm run build
-	cd client && npm install && npm start
+	yarn workspace @grotto/client-web build
+	yarn workspace @grotto/example-basic-client start

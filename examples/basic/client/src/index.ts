@@ -4,11 +4,11 @@
  * Targets the example server via Grotto WebSocket (ws://server:50051 in compose).
  * Requires a Grotto server (e.g. examples/basic/server) speaking the WebSocket RPC protocol.
  *
- *   npm start -- ws://localhost:50051
+ *   yarn start ws://localhost:50051
  */
 import { GrottoRpc } from '@grotto/client-web';
 
-import { PingRequest, PingServiceClientImpl } from './gen/ping/ping.js';
+import { PingRequest, PingServiceClientImpl } from '../gen/ping/ping.js';
 
 const target = process.argv[2] ?? process.env.GROTTO_WS_URL ?? 'ws://localhost:50051';
 

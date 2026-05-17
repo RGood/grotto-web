@@ -1,0 +1,13 @@
+{
+  "name": "grotto-web",
+  "private": true,
+  "workspaces": [
+    "client-web",
+    "examples/basic/client"
+  ],
+  "scripts": {
+    "build": "yarn workspace @grotto/client-web build",
+    "test": "yarn workspace @grotto/client-web test",
+    "example": "yarn workspace @grotto/example-basic-client start"
+  }
+}
