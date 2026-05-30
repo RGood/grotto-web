@@ -22,6 +22,6 @@ COPY --from=build /repo ./
 
 WORKDIR /app/examples/basic/client
 
-ENV GROTTO_WS_URL=ws://server:50051
+ENV GROTTO_URL=http://server:50051
 
 ENTRYPOINT ["yarn", "start"]

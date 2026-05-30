@@ -11,7 +11,7 @@ require (
 replace github.com/RGood/grotto-web/server => ../../../server
 
 require (
-	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.34.0 // indirect

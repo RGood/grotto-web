@@ -1,4 +1,4 @@
-/** Grotto RPC wire format — binary frames over a single WebSocket. */
+/** Grotto RPC wire format — binary frames over a streaming HTTP body. */
 
 export const GROTTO_MAGIC = 0x47525443; // "GRTC"
 
@@ -10,7 +10,7 @@ export const enum FrameType {
   CANCEL = 5,
 }
 
-const HEADER_SIZE = 16;
+export const HEADER_SIZE = 16;
 
 export interface FrameHeader {
   callId: number;

@@ -16,5 +16,5 @@ services:
     depends_on:
       - server
     environment:
-      GROTTO_WS_URL: ws://server:50051
+      GROTTO_URL: http://server:50051
     restart: "no"

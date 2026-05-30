@@ -2,12 +2,13 @@ package grottoserver
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"strings"
 
-	"github.com/gorilla/websocket"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -20,8 +21,9 @@ type serviceInfo struct {
 }
 
 type GrottoServer struct {
-	services map[string]serviceInfo
-	logger   *log.Logger
+	services     map[string]serviceInfo
+	logger       *log.Logger
+	bidiSessions *bidiSessionRegistry
 }
 
 var _ grpc.ServiceRegistrar = (*GrottoServer)(nil)
@@ -47,13 +49,10 @@ func WithLogging(enabled bool) Option {
 	}
 }
 
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(*http.Request) bool { return true },
-}
-
 func NewServer(opts ...Option) *GrottoServer {
 	s := &GrottoServer{
-		services: make(map[string]serviceInfo),
+		services:     make(map[string]serviceInfo),
+		bidiSessions: newBidiSessionRegistry(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -83,7 +82,7 @@ func (s *GrottoServer) RegisterService(desc *grpc.ServiceDesc, impl any) {
 	}
 }
 
-// ParseMethodPath splits a gRPC method path from a WebSocket request URL
+// ParseMethodPath splits a gRPC method path from an HTTP request URL
 // (e.g. "/ping.PingService/Ping") into service and method names.
 func ParseMethodPath(path string) (service, method string, ok bool) {
 	path = strings.Trim(path, "/")
@@ -131,11 +130,38 @@ func (s *GrottoServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ws, err := wsUpgrader.Upgrade(w, r, nil)
-	if err != nil {
-		s.logf("grotto: upgrade failed remote=%s path=%s: %v", r.RemoteAddr, r.URL.Path, err)
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	sessionID := r.Header.Get(HeaderSessionID)
+	isBidi := stream != nil && stream.ClientStreams && stream.ServerStreams
+
+	if isBidi {
+		kind := "bidi-server"
+		if sessionID != "" {
+			kind = "bidi-client"
+		}
+		s.logf("grotto: rpc start remote=%s path=%s kind=%s session=%s", r.RemoteAddr, r.URL.Path, kind, sessionID)
+
+		ctx := r.Context()
+		var serveErr error
+		if sessionID == "" {
+			serveErr = s.serveBidiServerLeg(ctx, r.Body, w, info.impl, *stream)
+		} else {
+			serveErr = s.serveBidiClientLeg(ctx, r.Body, w, sessionID)
+		}
+		if serveErr != nil {
+			s.logf("grotto: rpc error remote=%s path=%s: %v", r.RemoteAddr, r.URL.Path, serveErr)
+		} else {
+			s.logf("grotto: rpc ok remote=%s path=%s", r.RemoteAddr, r.URL.Path)
+		}
+		return
+	}
+
+	setGrottoResponseHeaders(w)
+	w.WriteHeader(http.StatusOK)
 
 	kind := "unary"
 	if stream != nil {
@@ -143,11 +169,12 @@ func (s *GrottoServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logf("grotto: rpc start remote=%s path=%s kind=%s", r.RemoteAddr, r.URL.Path, kind)
 
+	ctx := r.Context()
 	var serveErr error
 	if method != nil {
-		serveErr = s.serveUnary(ws, info.impl, *method)
+		serveErr = s.serveUnary(ctx, r.Body, w, info.impl, *method)
 	} else {
-		serveErr = s.serveStream(ws, info.impl, *stream)
+		serveErr = s.serveStream(ctx, r.Body, w, info.impl, *stream)
 	}
 	if serveErr != nil {
 		s.logf("grotto: rpc error remote=%s path=%s: %v", r.RemoteAddr, r.URL.Path, serveErr)
@@ -156,10 +183,13 @@ func (s *GrottoServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.logf("grotto: rpc ok remote=%s path=%s", r.RemoteAddr, r.URL.Path)
 }
 
-func (s *GrottoServer) serveUnary(ws *websocket.Conn, impl any, method grpc.MethodDesc) error {
-	conn := newRPCConn(ws)
+func (s *GrottoServer) serveUnary(ctx context.Context, body io.Reader, w http.ResponseWriter, impl any, method grpc.MethodDesc) error {
+	conn := newRPCConn(ctx, body, w)
 	if err := conn.consumeUnaryRequest(); err != nil {
 		return conn.finishError(err)
+	}
+	if !conn.requestReceived {
+		return conn.finishError(errors.New("client closed stream without sending a request message"))
 	}
 
 	requestBody := conn.requestBody
@@ -182,8 +212,21 @@ func (s *GrottoServer) serveUnary(ws *websocket.Conn, impl any, method grpc.Meth
 	return conn.finishOK()
 }
 
-func (s *GrottoServer) serveStream(ws *websocket.Conn, impl any, desc grpc.StreamDesc) error {
-	conn := newRPCConn(ws)
+func (s *GrottoServer) serveStream(ctx context.Context, body io.Reader, w http.ResponseWriter, impl any, desc grpc.StreamDesc) error {
+	conn := newRPCConn(ctx, body, w)
+	if desc.ClientStreams && !desc.ServerStreams {
+		if err := conn.consumeStreamHeaders(); err != nil {
+			return conn.finishError(err)
+		}
+	}
+	if desc.ServerStreams && !desc.ClientStreams {
+		if err := conn.consumeServerStreamRequest(); err != nil {
+			return conn.finishError(err)
+		}
+		if !conn.requestReceived {
+			return conn.finishError(errors.New("client closed stream without sending a request message"))
+		}
+	}
 	stream := &grpcServerStream{conn: conn}
 	if err := desc.Handler(impl, stream); err != nil {
 		return conn.finishError(err)
@@ -191,7 +234,7 @@ func (s *GrottoServer) serveStream(ws *websocket.Conn, impl any, desc grpc.Strea
 	return conn.finishOK()
 }
 
-// grpcServerStream adapts an RPC WebSocket to grpc.ServerStream.
+// grpcServerStream adapts an HTTP streaming RPC to grpc.ServerStream.
 type grpcServerStream struct {
 	conn *rpcConn
 }

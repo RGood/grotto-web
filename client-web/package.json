@@ -1,7 +1,7 @@
 {
   "name": "@grotto-web/client-web",
   "version": "0.1.0",
-  "description": "gRPC-over-WebSocket client transport for Node and browsers (ts-proto Rpc)",
+  "description": "gRPC-over-HTTP streaming client transport for Node and browsers (ts-proto Rpc)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -34,7 +34,8 @@
   "homepage": "https://github.com/RGood/grotto-web/tree/main/client-web#readme",
   "keywords": [
     "grpc",
-    "websocket",
+    "http",
+    "streaming",
     "grotto",
     "ts-proto",
     "rpc",
@@ -47,20 +48,10 @@
   "publishConfig": {
     "access": "public"
   },
-  "peerDependencies": {
-    "ws": "^8.0.0"
-  },
-  "peerDependenciesMeta": {
-    "ws": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@bufbuild/protobuf": "^2.10.2",
     "@types/node": "^22.15.21",
-    "@types/ws": "^8.18.1",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3",
-    "ws": "^8.18.2"
+    "typescript": "^5.8.3"
   }
 }

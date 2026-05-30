@@ -4,31 +4,112 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"sync"
 
-	"github.com/gorilla/websocket"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
-type rpcConn struct {
-	ws *websocket.Conn
-	mu sync.Mutex
-
-	ctx            context.Context
-	clientMetadata metadata.MD
-	requestBody    []byte
-	recvClosed     bool
-	sentHeader     bool
-	finished       bool
+type inboundFrame struct {
+	typ     uint8
+	payload []byte
+	err     error
 }
 
-func newRPCConn(ws *websocket.Conn) *rpcConn {
-	return &rpcConn{
-		ws:  ws,
-		ctx: context.Background(),
+type rpcConn struct {
+	writer *frameWriter
+	mu     sync.Mutex
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	inbound  chan inboundFrame
+	readDone chan struct{}
+
+	clientMetadata  metadata.MD
+	requestBody     []byte
+	requestReceived bool
+	recvClosed      bool
+	sentHeader      bool
+	finished        bool
+
+	onTerminate     func()
+	onTerminateOnce sync.Once
+}
+
+func newRPCConn(ctx context.Context, body io.Reader, w http.ResponseWriter) *rpcConn {
+	ctx, cancel := context.WithCancel(ctx)
+	c := &rpcConn{
+		writer:   newFrameWriter(w),
+		ctx:      ctx,
+		cancel:   cancel,
+		inbound:  make(chan inboundFrame, 16),
+		readDone: make(chan struct{}),
+	}
+	go c.readLoop(newFrameReader(body))
+	return c
+}
+
+func (c *rpcConn) setOnTerminate(fn func()) {
+	c.onTerminate = fn
+}
+
+func (c *rpcConn) invokeTerminate() {
+	c.onTerminateOnce.Do(func() {
+		if c.onTerminate != nil {
+			c.onTerminate()
+		}
+	})
+}
+
+func (c *rpcConn) readLoop(fr *frameReader) {
+	defer close(c.readDone)
+	defer close(c.inbound)
+	abnormal := false
+	defer func() {
+		if abnormal {
+			c.invokeTerminate()
+		}
+	}()
+	for {
+		hdr, payload, err := fr.readFrame()
+		if err != nil {
+			if err == io.EOF {
+				c.pushInbound(inboundFrame{typ: frameHalfClose})
+			} else {
+				abnormal = true
+				c.cancel()
+			}
+			return
+		}
+		if hdr.callID != singleCallID {
+			continue
+		}
+
+		switch hdr.typ {
+		case frameHalfClose:
+			c.pushInbound(inboundFrame{typ: frameHalfClose})
+			return
+		case frameCancel:
+			abnormal = true
+			c.pushInbound(inboundFrame{
+				err: status.Error(codes.Canceled, "call cancelled"),
+			})
+			c.cancel()
+			return
+		default:
+			c.pushInbound(inboundFrame{typ: hdr.typ, payload: payload})
+		}
+	}
+}
+
+func (c *rpcConn) pushInbound(frame inboundFrame) {
+	select {
+	case c.inbound <- frame:
+	case <-c.ctx.Done():
 	}
 }
 
@@ -54,30 +135,21 @@ func (c *rpcConn) SetTrailer(md metadata.MD) {}
 func (c *rpcConn) RecvMsg(m any) error {
 	for {
 		c.mu.Lock()
-		if c.recvClosed {
-			c.mu.Unlock()
-			return io.EOF
-		}
-		if len(c.requestBody) > 0 {
+		if c.requestReceived {
 			body := c.requestBody
 			c.requestBody = nil
+			c.requestReceived = false
 			c.mu.Unlock()
 			return proto.Unmarshal(body, m.(proto.Message))
 		}
 		c.mu.Unlock()
 
-		// Do not hold mu while blocked on the WebSocket read; otherwise
-		// concurrent SendMsg (e.g. chat broadcast) deadlocks until Recv unblocks.
 		hdr, payload, err := c.readFrame()
 		if err != nil {
 			return err
 		}
 
 		c.mu.Lock()
-		if hdr.callID != singleCallID {
-			c.mu.Unlock()
-			continue
-		}
 		switch hdr.typ {
 		case frameHeaders:
 			hp, err := decodeJSON[headersPayload](payload)
@@ -131,10 +203,14 @@ func (c *rpcConn) SendMsg(m any) error {
 		}
 	}
 
-	return c.writeFrameLocked(frameMessage, wrapGrpcMessage(body))
+	if err := c.writeFrameLocked(frameMessage, wrapGrpcMessage(body)); err != nil {
+		c.cancel()
+		return err
+	}
+	return nil
 }
 
-func (c *rpcConn) consumeUnaryRequest() error {
+func (c *rpcConn) consumeStreamHeaders() error {
 	for {
 		c.mu.Lock()
 		if c.recvClosed {
@@ -149,10 +225,55 @@ func (c *rpcConn) consumeUnaryRequest() error {
 		}
 
 		c.mu.Lock()
-		if hdr.callID != singleCallID {
+		switch hdr.typ {
+		case frameHeaders:
+			hp, err := decodeJSON[headersPayload](payload)
+			if err != nil {
+				c.mu.Unlock()
+				return err
+			}
+			c.clientMetadata = metadataFromJSON(hp.Metadata)
+			c.ctx = metadata.NewIncomingContext(c.ctx, c.clientMetadata)
 			c.mu.Unlock()
-			continue
+			return nil
+		case frameMessage:
+			body, err := decodeGrpcPayload(payload)
+			if err != nil {
+				c.mu.Unlock()
+				return err
+			}
+			c.requestBody = body
+			c.requestReceived = true
+			c.mu.Unlock()
+			return nil
+		case frameHalfClose:
+			c.recvClosed = true
+			c.mu.Unlock()
+			return nil
+		case frameCancel:
+			c.mu.Unlock()
+			return status.Error(codes.Canceled, "call cancelled")
+		default:
+			c.mu.Unlock()
 		}
+	}
+}
+
+func (c *rpcConn) consumeServerStreamRequest() error {
+	for {
+		c.mu.Lock()
+		if c.requestReceived {
+			c.mu.Unlock()
+			return nil
+		}
+		c.mu.Unlock()
+
+		hdr, payload, err := c.readFrame()
+		if err != nil {
+			return err
+		}
+
+		c.mu.Lock()
 		switch hdr.typ {
 		case frameHeaders:
 			hp, err := decodeJSON[headersPayload](payload)
@@ -170,12 +291,69 @@ func (c *rpcConn) consumeUnaryRequest() error {
 				return err
 			}
 			c.requestBody = body
+			c.requestReceived = true
 			c.mu.Unlock()
 			return nil
 		case frameHalfClose:
-			c.recvClosed = true
+			if c.requestReceived {
+				c.recvClosed = true
+				c.mu.Unlock()
+				return nil
+			}
+			c.mu.Unlock()
+			continue
+		case frameCancel:
+			c.mu.Unlock()
+			return status.Error(codes.Canceled, "call cancelled")
+		default:
+			c.mu.Unlock()
+		}
+	}
+}
+
+func (c *rpcConn) consumeUnaryRequest() error {
+	for {
+		c.mu.Lock()
+		if c.requestReceived {
 			c.mu.Unlock()
 			return nil
+		}
+		c.mu.Unlock()
+
+		hdr, payload, err := c.readFrame()
+		if err != nil {
+			return err
+		}
+
+		c.mu.Lock()
+		switch hdr.typ {
+		case frameHeaders:
+			hp, err := decodeJSON[headersPayload](payload)
+			if err != nil {
+				c.mu.Unlock()
+				return err
+			}
+			c.clientMetadata = metadataFromJSON(hp.Metadata)
+			c.ctx = metadata.NewIncomingContext(c.ctx, c.clientMetadata)
+			c.mu.Unlock()
+		case frameMessage:
+			body, err := decodeGrpcPayload(payload)
+			if err != nil {
+				c.mu.Unlock()
+				return err
+			}
+			c.requestBody = body
+			c.requestReceived = true
+			c.mu.Unlock()
+			return nil
+		case frameHalfClose:
+			if c.requestReceived {
+				c.recvClosed = true
+				c.mu.Unlock()
+				return nil
+			}
+			c.mu.Unlock()
+			continue
 		case frameCancel:
 			c.mu.Unlock()
 			return status.Error(codes.Canceled, "call cancelled")
@@ -221,24 +399,34 @@ func (c *rpcConn) finishLocked(code codes.Code, st *status.Status) error {
 	}
 	payload, err := encodeJSON(tp)
 	if err != nil {
+		c.cancel()
 		return err
 	}
 	if err := c.writeFrameLocked(frameTrailers, payload); err != nil {
+		c.cancel()
 		return err
 	}
-	return c.ws.Close()
+	c.cancel()
+	return nil
 }
 
 func (c *rpcConn) readFrame() (frameHeader, []byte, error) {
-	_, data, err := c.ws.ReadMessage()
-	if err != nil {
-		return frameHeader{}, nil, err
+	select {
+	case <-c.ctx.Done():
+		return frameHeader{}, nil, c.ctx.Err()
+	case frame, ok := <-c.inbound:
+		if !ok {
+			return frameHeader{}, nil, io.EOF
+		}
+		if frame.err != nil {
+			return frameHeader{}, nil, frame.err
+		}
+		return frameHeader{callID: singleCallID, typ: frame.typ}, frame.payload, nil
 	}
-	return decodeFrame(data)
 }
 
 func (c *rpcConn) writeFrameLocked(typ uint8, payload []byte) error {
-	return c.ws.WriteMessage(websocket.BinaryMessage, encodeFrame(singleCallID, typ, payload, 0))
+	return c.writer.writeFrame(singleCallID, typ, payload)
 }
 
 func (c *rpcConn) writeHeadersLocked(md metadata.MD) error {
@@ -293,4 +481,4 @@ func mdToJSON(md metadata.MD) map[string]any {
 	return out
 }
 
-var errNotProto = errors.New("grotto: not a proto message")
+var errNotProto = errors.New("grotto: not a proto.Message")

@@ -1,16 +1,13 @@
 /**
- * Example: ts-proto PingService client over Grotto WebSocket transport.
+ * Example: ts-proto PingService client over Grotto HTTP streaming transport.
  *
- * Targets the example server via Grotto WebSocket (ws://server:50051 in compose).
- * Requires a Grotto server (e.g. examples/basic/server) speaking the WebSocket RPC protocol.
- *
- *   yarn start ws://localhost:50051
+ *   yarn start http://localhost:50051
  */
 import { GrottoRpc } from '@grotto-web/client-web';
 
 import { PingRequest, PingServiceClientImpl } from './gen/ping/ping.js';
 
-const target = process.argv[2] ?? process.env.GROTTO_WS_URL ?? 'ws://localhost:50051';
+const target = process.argv[2] ?? process.env.GROTTO_URL ?? 'http://localhost:50051';
 
 async function main(): Promise<void> {
   const client = new PingServiceClientImpl(new GrottoRpc(target));
